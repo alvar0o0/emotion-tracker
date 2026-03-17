@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
+from typing import List
 from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
@@ -27,6 +28,12 @@ class Emotion(BaseModel):
     emotion: str
     level: int
 
+class EmotionResponse(Emotion):
+    id: int
+    timestamp: datetime.datetime
+    class Config:
+        orm_mode = True
+
 # FastAPI app
 app = FastAPI()
 
@@ -45,3 +52,7 @@ def log_emotion(emotion: Emotion, db: "Session" = Depends(get_db)):
     db.commit()
     db.refresh(db_emotion)
     return db_emotion
+
+@app.get("/logs", response_model=List[EmotionResponse])
+def get_logs(db: "Session" = Depends(get_db)):
+    return db.query(EmotionLog).all()
