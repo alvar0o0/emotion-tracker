@@ -3,6 +3,13 @@ import pandas as pd
 import altair as alt
 from sqlalchemy import create_engine
 import datetime
+import logging
+
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # Database setup
 DATABASE_URL = "sqlite:///./emotions.db"
@@ -10,10 +17,16 @@ engine = create_engine(DATABASE_URL)
 
 def get_data():
     """Fetches data from the database and returns it as a DataFrame."""
-    query = "SELECT emotion, level, timestamp FROM emotion_logs"
-    df = pd.read_sql(query, engine)
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    return df
+    logger.info("Fetching data from database for dashboard")
+    try:
+        query = "SELECT emotion, level, timestamp FROM emotion_logs"
+        df = pd.read_sql(query, engine)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        logger.info("Successfully fetched %d rows", len(df))
+        return df
+    except Exception as e:
+        logger.error("Error fetching data from database: %s", e)
+        return pd.DataFrame()
 
 def main():
     st.title("Emotion Tracker Dashboard")
