@@ -1,6 +1,11 @@
 import os
 import requests
+from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+
+# Load environment variables from the root directory
+load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
+
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -23,7 +28,7 @@ EMOJI_TO_EMOTION = {
 EMOTION, LEVEL = range(2)
 
 # Backend API URL
-API_URL = "http://127.0.0.1:8000/log"
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/log")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Starts the conversation and asks for an emoji."""
