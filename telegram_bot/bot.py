@@ -1,8 +1,20 @@
 import os
+import sys
 import requests
 import logging
 from dotenv import load_dotenv
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    CallbackQueryHandler,
+    ConversationHandler,
+)
+
+# Ensure the root directory is on the path so we can import shared
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+from shared.constants import EKMAN_EMOTIONS, get_emotion_display_name
 
 # Configure logging
 logging.basicConfig(
@@ -13,24 +25,6 @@ logger = logging.getLogger(__name__)
 # Load environment variables from the root directory
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    ConversationHandler,
-    MessageHandler,
-    filters,
-)
-
-# Emotion mapping
-EMOJI_TO_EMOTION = {
-    "😊": "alegria",
-    "😢": "tristeza",
-    "😠": "enojo",
-    "😲": "sorpresa",
-    "😨": "miedo",
-}
-
 # Conversation states
 EMOTION, LEVEL = range(2)
 
@@ -38,60 +32,73 @@ EMOTION, LEVEL = range(2)
 API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/log")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Starts the conversation and asks for an emoji."""
+    """Starts the conversation and shows emotion buttons."""
     user = update.message.from_user
     logger.info("User %s started the conversation.", user.first_name)
+
+    keyboard = []
+    for emotion_key in EKMAN_EMOTIONS:
+        display_name = get_emotion_display_name(emotion_key)
+        keyboard.append([InlineKeyboardButton(display_name, callback_data=emotion_key)])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "Hola! Envíame un emoji para registrar tu emoción."
+        "¡Hola! ¿Cómo te sientes ahora mismo? Elige una opción:",
+        reply_markup=reply_markup
     )
     return EMOTION
 
-async def emotion(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Stores the selected emoji and asks for a level."""
-    user = update.message.from_user
-    user_emoji = update.message.text
-    if user_emoji not in EMOJI_TO_EMOTION:
-        logger.warning("User %s sent an invalid emoji: %s", user.first_name, user_emoji)
-        await update.message.reply_text("Por favor, envíame un emoji válido.")
-        return EMOTION
+async def emotion_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Stores the selected emotion and asks for a level."""
+    query = update.callback_query
+    await query.answer()
 
-    context.user_data["emotion"] = EMOJI_TO_EMOTION[user_emoji]
-    logger.info("Emotion selected by %s: %s", user.first_name, context.user_data["emotion"])
-    reply_keyboard = [["1", "2", "3", "4", "5"]]
+    emotion_key = query.data
+    context.user_data["emotion"] = emotion_key
 
-    await update.message.reply_text(
-        f"Qué nivel de {context.user_data['emotion']} sientes? (1-5)",
-        reply_markup=ReplyKeyboardMarkup(
-            reply_keyboard, one_time_keyboard=True, input_field_placeholder="Nivel?"
-        ),
+    display_name = get_emotion_display_name(emotion_key)
+    logger.info("Emotion selected: %s", emotion_key)
+
+    keyboard = [
+        [
+            InlineKeyboardButton("1", callback_data="1"),
+            InlineKeyboardButton("2", callback_data="2"),
+            InlineKeyboardButton("3", callback_data="3"),
+            InlineKeyboardButton("4", callback_data="4"),
+            InlineKeyboardButton("5", callback_data="5"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        f"Has seleccionado {display_name}.\n¿Qué nivel de intensidad sientes? (1-5)",
+        reply_markup=reply_markup,
     )
     return LEVEL
 
-async def level(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def level_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Stores the level and sends the data to the API."""
-    user = update.message.from_user
-    level = update.message.text
-    emotion = context.user_data["emotion"]
+    query = update.callback_query
+    await query.answer()
 
-    logger.info("Level selected by %s for %s: %s", user.first_name, emotion, level)
+    level = int(query.data)
+    emotion = context.user_data["emotion"]
+    user_name = query.from_user.first_name
+
+    logger.info("Level selected for %s: %s", emotion, level)
 
     try:
-        response = requests.post(API_URL, json={"emotion": emotion, "level": int(level)})
+        response = requests.post(API_URL, json={"emotion": emotion, "level": level})
         if response.status_code == 200:
-            logger.info("Emotion successfully registered for user %s", user.first_name)
-            await update.message.reply_text(
-                "Emoción registrada!", reply_markup=ReplyKeyboardRemove()
-            )
+            logger.info("Emotion successfully registered")
+            await query.edit_message_text("¡Emoción registrada con éxito!")
         else:
-            logger.error("Error from API for user %s: %s", user.first_name, response.text)
-            await update.message.reply_text(
-                "Hubo un error al registrar tu emoción.", reply_markup=ReplyKeyboardRemove()
-            )
+            logger.error("Error from API: %s", response.text)
+            await query.edit_message_text("Hubo un error al registrar tu emoción en el servidor.")
     except requests.exceptions.RequestException as e:
         logger.error("Connection error with backend: %s", e)
-        await update.message.reply_text(
-            "No se pudo conectar con el backend.", reply_markup=ReplyKeyboardRemove()
-        )
+        await query.edit_message_text("No se pudo conectar con el servidor backend.")
 
     return ConversationHandler.END
 
@@ -99,9 +106,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancels and ends the conversation."""
     user = update.message.from_user
     logger.info("User %s canceled the conversation.", user.first_name)
-    await update.message.reply_text(
-        "Registro de emoción cancelado.", reply_markup=ReplyKeyboardRemove()
-    )
+    await update.message.reply_text("Registro de emoción cancelado.")
     return ConversationHandler.END
 
 def main() -> None:
@@ -115,10 +120,14 @@ def main() -> None:
     application = Application.builder().token(token).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("registrar", start),
+            CommandHandler("emocion", start),
+        ],
         states={
-            EMOTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, emotion)],
-            LEVEL: [MessageHandler(filters.Regex("^[1-5]$"), level)],
+            EMOTION: [CallbackQueryHandler(emotion_selected)],
+            LEVEL: [CallbackQueryHandler(level_selected)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
