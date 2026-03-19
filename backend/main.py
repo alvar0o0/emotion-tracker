@@ -1,11 +1,17 @@
+import os
+import sys
 from fastapi import FastAPI, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import List
 from sqlalchemy import create_engine, Column, Integer, String, DateTime
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.declarative import declarative_base
 import datetime
 import logging
+
+# Ensure the root directory is on the path so we can import shared
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+from shared.constants import get_valid_emotions
 
 # Configure logging
 logging.basicConfig(
@@ -34,6 +40,18 @@ Base.metadata.create_all(bind=engine)
 class Emotion(BaseModel):
     emotion: str
     level: int
+
+    @validator('emotion')
+    def emotion_must_be_valid(cls, v):
+        if v not in get_valid_emotions():
+            raise ValueError(f"Emotion must be one of {get_valid_emotions()}")
+        return v
+
+    @validator('level')
+    def level_must_be_valid(cls, v):
+        if not (1 <= v <= 5):
+            raise ValueError("Level must be between 1 and 5")
+        return v
 
 class EmotionResponse(Emotion):
     id: int

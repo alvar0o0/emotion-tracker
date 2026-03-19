@@ -1,9 +1,15 @@
+import os
+import sys
 import streamlit as st
 import pandas as pd
 import altair as alt
 from sqlalchemy import create_engine
 import datetime
 import logging
+
+# Ensure the root directory is on the path so we can import shared
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+from shared.constants import get_emotion_display_name
 
 # Configure logging
 logging.basicConfig(
@@ -22,6 +28,8 @@ def get_data():
         query = "SELECT emotion, level, timestamp FROM emotion_logs"
         df = pd.read_sql(query, engine)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
+        # Map internal emotion keys to bilingual display names
+        df['emotion_display'] = df['emotion'].apply(get_emotion_display_name)
         logger.info("Successfully fetched %d rows", len(df))
         return df
     except Exception as e:
@@ -39,11 +47,11 @@ def main():
 
     # Bar chart of emotion counts
     st.header("Emotion Counts")
-    emotion_counts = df['emotion'].value_counts().reset_index()
-    emotion_counts.columns = ['emotion', 'count']
+    emotion_counts = df['emotion_display'].value_counts().reset_index()
+    emotion_counts.columns = ['emotion_display', 'count']
     bar_chart = alt.Chart(emotion_counts).mark_bar().encode(
-        x='emotion',
-        y='count'
+        x=alt.X('emotion_display', title='Emoción / Emotion', sort='-y'),
+        y=alt.Y('count', title='Conteo / Count')
     ).properties(
         width=alt.Step(80)  # controls width of bars
     )
@@ -57,10 +65,11 @@ def main():
     if today_df.empty:
         st.info("No emotions logged today.")
     else:
-        timeline_chart = alt.Chart(today_df).mark_line().encode(
-            x='timestamp',
-            y='level',
-            color='emotion'
+        timeline_chart = alt.Chart(today_df).mark_line(point=True).encode(
+            x=alt.X('timestamp', title='Hora / Time'),
+            y=alt.Y('level', title='Nivel / Level (1-5)', scale=alt.Scale(domain=[1, 5])),
+            color=alt.Color('emotion_display', title='Emoción / Emotion'),
+            tooltip=['emotion_display', 'level', 'timestamp']
         ).properties(
             title="Emotion Levels Over Time Today"
         )
